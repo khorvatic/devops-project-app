@@ -11,6 +11,48 @@ Prikazuje cijeli tok: lokalni razvoj kroz Compose i produkcijski deployment kroz
 - `postgres` - trajna pohrana narudzbi
 - `redis` - queue/cache sloj
 
+## Lokalno pokretanje (developer environment)
+
+Preduvjeti: Docker Desktop (s uključenim WSL2 backendom na Windowsu) i Docker Compose (dolazi ugrađen u Docker Desktop).
+
+### Prvo pokretanje
+
+1. Kopiraj primjer environment varijabli:
+```bash
+   cp .env.example .env
+```
+   Vrijednosti u `.env.example` su već ispravno postavljene za rad unutar Docker mreže — za lokalni razvoj ništa nije potrebno mijenjati.
+
+2. Pokreni cijeli stack (build + start svih 5 servisa):
+```bash
+   docker compose up -d --build
+```
+   `-d` pokreće kontejnere u pozadini, `--build` osigurava da se slike za `api`/`frontend`/`worker` izgrade prije starta.
+
+3. Provjeri da su svi servisi zdravi:
+```bash
+   docker compose ps
+```
+   `postgres`, `redis` i `api` bi trebali imati status `healthy`.
+
+Automatski se koristi i `compose.override.yaml`, koji za `api`, `worker` i `frontend` builda **razvojnu** varijantu slike (uključuje `nodemon`) i montira lokalni `src` folder u kontejner — svaka promjena koda se odmah primjenjuje bez ručnog rebuilda.
+
+### Svakodnevni rad
+
+- Pokreni stack: `docker compose up -d`
+- Prati logove uživo (npr. za `api`): `docker compose logs -f api`
+- Restartaj jedan servis: `docker compose restart api`
+- Zaustavi stack (podaci u Postgresu ostaju sačuvani): `docker compose down`
+- Zaustavi stack i **obriši** sve podatke (čisto stanje): `docker compose down -v`
+
+### Pokretanje produkcijske varijante slika lokalno
+
+Za testiranje "čistih" produkcijskih slika (bez nodemona, bez mountanog koda), eksplicitno isključi override datoteku:
+
+```bash
+docker compose -f compose.yaml up -d --build
+```
+
 ### Brza validacija funkcionalnosti
 
 1. Health API:
