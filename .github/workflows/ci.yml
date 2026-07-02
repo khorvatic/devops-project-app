@@ -17,7 +17,7 @@ jobs:
       - name: Postavi Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "20"
           cache: "npm"
           cache-dependency-path: api/package-lock.json
 
@@ -51,3 +51,35 @@ jobs:
           push: false
           tags: ticketing-${{ matrix.service }}:ci
           load: true
+
+  security-scan:
+    needs: build-images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, frontend, worker]
+
+    steps:
+      - name: Preuzmi kod iz repozitorija
+        uses: actions/checkout@v4
+
+      - name: Postavi Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Builda ${{ matrix.service }} produkcijsku sliku
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          target: production
+          push: false
+          tags: ticketing-${{ matrix.service }}:ci
+          load: true
+
+      - name: Trivy skeniranje — ${{ matrix.service }}
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ticketing-${{ matrix.service }}:ci
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
