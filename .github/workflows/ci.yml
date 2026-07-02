@@ -56,6 +56,7 @@ jobs:
     needs: build-images
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         service: [api, frontend, worker]
 
