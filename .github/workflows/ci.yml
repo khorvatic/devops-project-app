@@ -28,3 +28,26 @@ jobs:
       - name: Pokreni testove
         working-directory: ./api
         run: npm test
+
+  build-images:
+    needs: test-api
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, frontend, worker]
+
+    steps:
+      - name: Preuzmi kod iz repozitorija
+        uses: actions/checkout@v4
+
+      - name: Postavi Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Builda ${{ matrix.service }} produkcijsku sliku
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          target: production
+          push: false
+          tags: ticketing-${{ matrix.service }}:ci
+          load: true
