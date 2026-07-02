@@ -1,0 +1,21 @@
+services:
+  api:
+    build:
+      context: ./api
+      target: dev
+    volumes:
+      - ./api/src:/app/src
+
+  worker:
+    build:
+      context: ./worker
+      target: dev
+    volumes:
+      - ./worker/src:/app/src
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    volumes:
+      - ./frontend/src:/app/src
