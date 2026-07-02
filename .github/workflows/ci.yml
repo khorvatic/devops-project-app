@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Preuzmi kod iz repozitorija
+        uses: actions/checkout@v4
+
+      - name: Postavi Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: api/package-lock.json
+
+      - name: Instaliraj ovisnosti
+        working-directory: ./api
+        run: npm ci
+
+      - name: Pokreni testove
+        working-directory: ./api
+        run: npm test
