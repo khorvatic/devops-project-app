@@ -14,6 +14,10 @@ const pgPool = new Pool({
     password: process.env.POSTGRES_PASSWORD || "change_me_local"
 });
 
+pgPool.on("error", (error) => {
+    console.error("Neocekivana greska na neaktivnoj Postgres konekciji (worker):", error.message);
+});
+
 const redisClient = createClient({
     socket: {
         host: process.env.REDIS_HOST || "redis",
