@@ -2,16 +2,9 @@
 
 ## Pregled
 
-Sve tri aplikacijske slike (`api`, `frontend`, `worker`) skeniraju se automatski u
-CI pipelineu (`.github/workflows/ci.yml`, job `security-scan`) alatom
-[Trivy](https://trivy.dev/) nakon svakog builda. Pipeline koristi **quality
-gate**: build se prekida (exit kod 1) ako se pronađe bilo koja ranjivost
-razine HIGH ili CRITICAL koja ima objavljen popravak (`ignore-unfixed: true`
-namjerno isključuje ranjivosti bez dostupnog fixa, jer na njih trenutno ne
-možemo utjecati).
+Sve tri aplikacijske slike (`api`, `frontend`, `worker`) skeniraju se automatski u CI pipelineu (`.github/workflows/ci.yml`, job `security-scan`) alatom Trivy nakon svakog builda. Pipeline koristi quality gate: build se prekida (exit kod 1) ako se pronađe bilo koja ranjivost razine HIGH ili CRITICAL koja ima objavljen popravak (`ignore-unfixed: true` namjerno isključuje ranjivosti bez dostupnog fixa, jer na njih trenutno ne možemo utjecati).
 
-Skenira se **produkcijska** (`target: production`) faza slike — ne razvojna
-(`dev`) faza — jer je to varijanta koja bi se stvarno deployala.
+Skenira se **produkcijska** (`target: production`) faza slike, ne razvojna (`dev`) faza, jer je to varijanta koja bi se stvarno deployala.
 
 ## Prvi nalaz (prije korekcije)
 
@@ -30,35 +23,21 @@ Ukupno: 14 HIGH nalaza po slici, 0 CRITICAL.
 
 ## Analiza uzroka
 
-Bitno zapažanje: **nijedan** od pogođenih Node.js paketa (`cross-spawn`,
-`glob`, `minimatch`, `sigstore`, `tar`) nije direktna ni tranzitivna ovisnost
-same aplikacije (`api/package.json`, `frontend/package.json`,
-`worker/package.json` — sve tri koriste samo `dotenv`, `express`, `pg`,
-`redis`, `uuid`). Provjereno naredbom:
+Bitno zapažanje: ni jedan od pogođenih Node.js paketa (`cross-spawn`, `glob`, `minimatch`, `sigstore`, `tar`) nije direktna ni tranzitivna ovisnost same aplikacije (`api/package.json`, `frontend/package.json`, `worker/package.json`, sve tri koriste samo `dotenv`, `express`, `pg`, `redis`, `uuid`). Provjereno naredbom:
 
 ```bash
 docker run --rm -it ticketing-api sh
 find / -path "*/node_modules/tar" -maxdepth 8
 ```
 
-Nalaz potvrđuje da se ti paketi nalaze unutar `/usr/local/lib/node_modules/npm/`
-— dio su **npm CLI-ja koji je ugrađen u službenu `node:20-alpine` sliku**,
-ne dio aplikacijskog koda. Produkcijska slika pokreće aplikaciju direktno
-(`CMD ["node", "src/server.js"]`) i nikad ne poziva `npm` u runtimeu, pa je
-sam npm alat unutar produkcijske slike suvišan — prisutan je samo zato što
-ga base image donosi po defaultu.
+Nalaz potvrđuje da se ti paketi nalaze unutar `/usr/local/lib/node_modules/npm/` dio su npm CLI-ja koji je ugrađen u službenu `node:20-alpine` sliku, ne dio aplikacijskog koda. Produkcijska slika pokreće aplikaciju direktno (`CMD ["node", "src/server.js"]`) i nikad ne poziva `npm` u runtimeu, pa je sam npm alat unutar produkcijske slike suvišan, prisutan je samo zato što ga base image donosi po defaultu.
 
-OpenSSL nalaz (`libcrypto3`/`libssl3`) je odvojen slučaj: fix je već
-objavljen (`3.5.7-r0`) u trenutku skeniranja, ali `node:20-alpine` slika je
-bila povučena prije nego je ta zakrpana verzija ušla u Alpine paket
-repozitorij.
+OpenSSL nalaz (`libcrypto3`/`libssl3`) je odvojen slučaj: fix je već objavljen (`3.5.7-r0`) u trenutku skeniranja, ali `node:20-alpine` slika je bila povučena prije nego je ta zakrpana verzija ušla u Alpine paket repozitorij.
 
 ## Korektivne mjere
 
-1. **Uklonjen npm iz produkcijske faze svih triju Dockerfile-a.** Budući da
-   npm nije potreban za pokretanje aplikacije, uklanjanje smanjuje attack
-   surface i eliminira sve njegove tranzitivne ovisnosti odjednom, umjesto
-   pojedinačnog "whitelistanja" ili čekanja uzvodnih popravaka:
+1. Uklonjen npm iz produkcijske faze svih triju Dockerfile-a. Budući da npm nije potreban za pokretanje aplikacije, uklanjanje smanjuje attack surface i eliminira sve njegove tranzitivne ovisnosti odjednom, umjesto pojedinačnog "whitelistanja" ili čekanja uzvodnih popravaka:
+
 ```dockerfile
    RUN rm -rf /usr/local/lib/node_modules/npm \
        /usr/local/bin/npm \
@@ -66,28 +45,17 @@ repozitorij.
        /usr/local/lib/node_modules/corepack \
        /usr/local/bin/corepack
 ```
-2. **Dodan `apk upgrade` korak** prije kopiranja aplikacijskog koda, da se
-   povuku najnovije zakrpane verzije Alpine OS paketa dostupne u trenutku
-   builda:
+2. Dodan `apk upgrade` korak prije kopiranja aplikacijskog koda, da se povuku najnovije zakrpane verzije Alpine OS paketa dostupne u trenutku builda:
+
 ```dockerfile
    RUN apk update && apk upgrade --no-cache
 ```
-3. Oba koraka izvršena **prije** prebacivanja na `USER node` u Dockerfileu,
-   jer zahtijevaju root ovlasti koje non-root korisnik nema (i ne bi smio
-   imati).
+3. Oba koraka izvršena prije prebacivanja na `USER node` u Dockerfileu, jer zahtijevaju root ovlasti koje non-root korisnik nema (i ne bi smio imati).
 
 ## Rezultat nakon korekcije
 
-Ponovljeni scan nakon primjene navedenih izmjena (commit "Harden production
-images: remove npm, upgrade OS packages to fix Trivy findings") prošao je
-bez ijednog HIGH ili CRITICAL nalaza za sva tri servisa (`api`, `frontend`,
-`worker`). Pipeline `security-scan` job: **passed**.
+Ponovljeni scan nakon primjene navedenih izmjena (commit "Harden production images: remove npm, upgrade OS packages to fix Trivy findings") prošao je bez ijednog HIGH ili CRITICAL nalaza za sva tri servisa (`api`, `frontend`, `worker`). Pipeline `security-scan` job: passed.
 
 ## Napomena o kontinuiranom praćenju
 
-Ovo izvješće odražava stanje u trenutku pisanja. Budući da se nove
-ranjivosti otkrivaju kontinuirano, isti Trivy quality gate se izvršava na
-**svaki push** prema `main` grani (`.github/workflows/ci.yml`), pa se svaka
-buduća regresija (npr. nova ranjivost u nekoj od preostalih ovisnosti,
-`express`, `pg`, `redis`, `uuid`, `dotenv`) automatski otkriva prije nego
-slika stigne do produkcije.
+Ovo izvješće odražava stanje u trenutku pisanja. Budući da se nove ranjivosti otkrivaju kontinuirano, isti Trivy quality gate se izvršava na svaki push prema `main` grani (`.github/workflows/ci.yml`), pa se svaka buduća regresija (npr. nova ranjivost u nekoj od preostalih ovisnosti, `express`, `pg`, `redis`, `uuid`, `dotenv`) automatski otkriva prije nego slika stigne do produkcije.
