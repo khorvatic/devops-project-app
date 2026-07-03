@@ -21,6 +21,8 @@ const redisClient = createClient({
     }
 });
 
+const blockingClient = redisClient.duplicate();
+
 async function processOrder(rawPayload) {
     const order = JSON.parse(rawPayload);
     await pgPool.query(
@@ -56,13 +58,32 @@ const healthServer = http.createServer(async (req, res) => {
     res.end();
 });
 
+async function waitForPostgres(retries = 10, delayMs = 3000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            await pgPool.query("SELECT 1");
+            return;
+        } catch (error) {
+            console.warn(`Postgres nije dostupan (pokušaj ${attempt}/${retries}): ${error.message}`);
+            if (attempt === retries) {
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 async function startWorker() {
     redisClient.on("error", (error) => {
         console.error("Redis error:", error.message);
     });
+    blockingClient.on("error", (error) => {
+        console.error("Redis blocking client error:", error.message);
+    });
 
     await redisClient.connect();
-    await pgPool.query("SELECT 1");
+    await blockingClient.connect();
+    await waitForPostgres();
 
     healthServer.listen(healthPort, () => {
         console.log(`Worker health server listening on port ${healthPort}`);
@@ -72,7 +93,7 @@ async function startWorker() {
 
     while (true) {
         try {
-            const result = await redisClient.brPop(queueName, 0);
+            const result = await blockingClient.brPop(queueName, 0);
             if (result?.element) {
                 await processOrder(result.element);
                 console.log("Order processed");
@@ -94,6 +115,9 @@ process.on("SIGTERM", async () => {
     await pgPool.end();
     if (redisClient.isOpen) {
         await redisClient.quit();
+    }
+    if (blockingClient.isOpen) {
+        await blockingClient.quit();
     }
     process.exit(0);
 });
