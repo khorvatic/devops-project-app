@@ -12,6 +12,7 @@ RUN npm ci
 COPY --chown=node:node src ./src
 
 ENV NODE_ENV=development
+EXPOSE 9000
 
 USER node
 
@@ -34,6 +35,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 
 
 ENV NODE_ENV=production
+EXPOSE 9000
 
 USER node
 

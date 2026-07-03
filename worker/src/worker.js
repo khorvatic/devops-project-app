@@ -1,8 +1,10 @@
 const { Pool } = require("pg");
 const { createClient } = require("redis");
+const http = require("http");
 require("dotenv").config();
 
 const queueName = process.env.QUEUE_NAME || "ticket_orders";
+const healthPort = Number(process.env.WORKER_HEALTH_PORT || 9000);
 
 const pgPool = new Pool({
     host: process.env.POSTGRES_HOST || "postgres",
@@ -29,6 +31,31 @@ async function processOrder(rawPayload) {
     );
 }
 
+// --- Health check HTTP server ---
+const healthServer = http.createServer(async (req, res) => {
+    if (req.url === "/healthz") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", service: "worker" }));
+        return;
+    }
+
+    if (req.url === "/readyz") {
+        try {
+            await pgPool.query("SELECT 1");
+            await redisClient.ping();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "ready" }));
+        } catch (error) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "not-ready", error: error.message }));
+        }
+        return;
+    }
+
+    res.writeHead(404);
+    res.end();
+});
+
 async function startWorker() {
     redisClient.on("error", (error) => {
         console.error("Redis error:", error.message);
@@ -36,6 +63,10 @@ async function startWorker() {
 
     await redisClient.connect();
     await pgPool.query("SELECT 1");
+
+    healthServer.listen(healthPort, () => {
+        console.log(`Worker health server listening on port ${healthPort}`);
+    });
 
     console.log("Worker started and waiting for jobs...");
 
@@ -59,6 +90,7 @@ startWorker().catch((error) => {
 });
 
 process.on("SIGTERM", async () => {
+    healthServer.close();
     await pgPool.end();
     if (redisClient.isOpen) {
         await redisClient.quit();
